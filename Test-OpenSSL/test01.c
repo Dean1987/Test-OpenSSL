@@ -171,10 +171,10 @@ bool test_01( )
 	} 
 
 	//  /* finish connection */
-	//nopoll_conn_close( conn );
+	les_ssl_conn_close( conn );
 
 	///* finish */
-	//nopoll_ctx_unref( ctx );
+	les_ssl_ctx_unref( ctx );
 
 	return true;
 }

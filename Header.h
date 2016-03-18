@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <ctype.h>
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <WinSock2.h>
@@ -17,6 +18,7 @@
 //#include <openssl/ssl.h>
 //#include <openssl/err.h>
 #include "Test-OpenSSL/les_ssl_enum.h"
+
 /***************************Predefine************************************/
 typedef struct _LES_SSL_IoEngine LES_SSL_IoEngine;
 typedef struct _LES_SSL_Context LES_SSL_Context;
@@ -36,7 +38,7 @@ typedef void( *IoMechClear )  ( LES_SSL_Context* ctx , voidPtr io_object );
 typedef int( *IoMechWait )  ( LES_SSL_Context* ctx , voidPtr io_object );
 typedef bool( *IoMechAddTo )  ( int ds , LES_SSL_Context* ctx , LES_SSL_Conn* conn , voidPtr io_object );
 typedef bool( *IoMechIsSet )  ( LES_SSL_Context* ctx , int fds , voidPtr io_object );
-typedef int( *LES_SSL_Read ) ( LES_SSL_Conn* conn ,char* buffer , int buffer_size );
+typedef int( *LES_SSL_Read ) ( LES_SSL_Conn* conn ,char* buffer , size_t buffer_size );
 typedef void( *OnMessageHandler ) ( LES_SSL_Context* ctx , LES_SSL_Conn* conn , LES_SSL_Msg* msg , voidPtr user_data );
 typedef bool( *ActionHandler ) ( LES_SSL_Context* ctx , LES_SSL_Conn* conn , voidPtr user_data );
 typedef void( *OnCloseHandler )    ( LES_SSL_Context* ctx , LES_SSL_Conn* conn , voidPtr user_data );
@@ -44,6 +46,8 @@ typedef voidPtr( *MutexCreate ) ( void );
 typedef void( *MutexDestroy ) ( voidPtr mutex );
 typedef void( *MutexLock ) ( voidPtr mutex );
 typedef void( *MutexUnlock ) ( voidPtr mutex );
+
+#define INT_TO_PTR( integer )   ( ( voidPtr ) ( ( size_t )integer ) )
 /****************************Test Function********************************/
 bool test_01_base64( );
 bool test_01_masking( );

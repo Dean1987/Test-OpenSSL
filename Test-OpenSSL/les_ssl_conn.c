@@ -3,6 +3,7 @@
 #include "les_ssl_conn.h"
 #include "les_ssl_conn_opts.h"
 #include "les_ssl_handshake.h"
+#include "les_ssl_string.h"
 
 //设置非延时
 bool conn_set_sock_tcp_nodelay( SOCKET sSocket , bool bEnable )
@@ -204,10 +205,10 @@ bool les_ssl_conn_is_ready( LES_SSL_Conn* pConn )
 	return pConn->bHandshake_ok;
 }
 
-int les_ssl_conn_readline( LES_SSL_Conn* pConn , char* strBuffer , int nMaxlen )
+size_t les_ssl_conn_readline( LES_SSL_Conn* pConn , char* strBuffer , int nMaxlen )
 {
 	int nRc = 0;
-	int nDesp = 0;
+	size_t nDesp = 0;
 	char* strPtr = NULL;
 
 	/* clear the buffer received */
@@ -271,7 +272,7 @@ int les_ssl_conn_readline( LES_SSL_Conn* pConn , char* strBuffer , int nMaxlen )
 					if( ( n + nDesp - 1 ) > 0 )
 					{
 						strBuffer[n + nDesp - 1] = 0;
-						pConn->strPending_line = strdup( strBuffer );
+						pConn->strPending_line = _strdup( strBuffer );
 					}
 				}
 				return -2;
@@ -295,7 +296,7 @@ int les_ssl_conn_readline( LES_SSL_Conn* pConn , char* strBuffer , int nMaxlen )
 	*strPtr = 0;
 	return ( n + nDesp );
 }
-bool les_ssl_conn_get_http_url( LES_SSL_Conn* pConn , const char* strBuffer , int nBuffer_size , const char* strMethod , char** strUrl )
+bool les_ssl_conn_get_http_url( LES_SSL_Conn* pConn , const char* strBuffer , size_t nBuffer_size , const char* strMethod , char** strUrl )
 {
 	int nIterator = 0;
 	int nIterator2 = 0;
@@ -370,4 +371,144 @@ bool les_ssl_conn_get_http_url( LES_SSL_Conn* pConn , const char* strBuffer , in
 	  /* now check trailing content */
 	return strcmp( strBuffer + nIterator , "HTTP/1.1\r\n" ) == 0
 		|| strcmp( strBuffer + nIterator , "HTTP/1.1\n" );
+}
+
+bool les_ssl_conn_get_mime_header( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn , const char* strBuffer , size_t nBuffer_size 
+	, char** strHeader , char** strValue )
+{
+	int nIterator = 0;
+	int nIterator2 = 0;
+
+	/* ok, find the first : */
+	while( nIterator < nBuffer_size && strBuffer[nIterator] && strBuffer[nIterator] != ':' )
+		nIterator++;
+	if( strBuffer[nIterator] != ':' )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "Expected to find mime header separator : but it wasn't found (buffer_size=%d, iterator=%d, content: [%s].."
+			, nBuffer_size , nIterator , strBuffer );
+		return false;
+	}
+
+	/* copy the header value */
+	( *strHeader ) = calloc_new( char , nIterator + 1 );
+	memcpy( *strHeader , strBuffer , nIterator );
+
+	/* now get the mime header value */
+	nIterator2 = nIterator + 1;
+	while( nIterator2 < nBuffer_size && strBuffer[nIterator2] && strBuffer[nIterator2] != '\n' )
+		nIterator2++;
+	if( strBuffer[nIterator2] != '\n' )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Expected to find mime header value end (13) but it wasn't found (iterator=%d, iterator2=%d,"
+			"for header: [%s], found value: [%d]), inside content: [%s].."
+			, nIterator , nIterator2 , ( *strHeader ) , ( int ) strBuffer[nIterator2] , strBuffer );
+		free( *strHeader );
+		( *strHeader ) = NULL;
+		( *strValue ) = NULL;
+		return false;
+	}
+
+	/* copy the value */
+	( *strValue ) = calloc_new( char , ( nIterator2 - nIterator ) + 1 );
+	memcpy( *strValue , strBuffer + nIterator + 1 , nIterator2 - nIterator );
+
+	/* trim content */
+	les_ssl_string_trim( *strValue , NULL );
+	les_ssl_string_trim( *strHeader , NULL );
+
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+		, "Found MIME header: '%s' -> '%s'" , *strHeader , *strValue );
+	return true;
+}
+
+bool les_ssl_conn_check_mime_header_repeated( LES_SSL_Conn* pConn , char* strHeader , char* strValue ,
+	const char* strRef_header ,	voidPtr pCheck )
+{
+	if( _stricmp( strRef_header , strHeader ) == 0 )
+	{
+		if( pCheck )
+		{
+			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+				, "Provided header %s twice, closing connection" , strHeader );
+			free( strHeader );
+			free( strValue );
+			les_ssl_conn_shutdown( pConn );
+			return true;
+		} 
+	} 
+	return false;
+}
+void les_ssl_conn_close( LES_SSL_Conn* strConn , int nStatus , const char* strReason , int nReason_size )
+{
+	int nRefs = 0;
+	char * content;
+#if defined(SHOW_DEBUG_LOG)
+	const char * role = "unknown";
+#endif
+
+	/* check input data */
+	if( strConn == NULL )
+		return;
+
+#if defined(SHOW_DEBUG_LOG)
+	if( conn->role == NOPOLL_ROLE_LISTENER )
+		role = "listener";
+	else if( conn->role == NOPOLL_ROLE_MAIN_LISTENER )
+		role = "master-listener";
+	else if( conn->role == NOPOLL_ROLE_UNKNOWN )
+		role = "unknown";
+	else if( conn->role == NOPOLL_ROLE_CLIENT )
+		role = "client";
+
+	nopoll_log( conn->ctx , NOPOLL_LEVEL_DEBUG , "Calling to close close id=%d (session %d, refs: %d, role: %s)" ,
+		conn->id , conn->session , conn->refs , role );
+#endif
+	if( strConn->session != NOPOLL_INVALID_SOCKET )
+	{
+		nopoll_log( strConn->ctx , NOPOLL_LEVEL_DEBUG , "requested proper connection close id=%d (session %d)" , strConn->id , strConn->session );
+
+		/* build reason indication */
+		content = NULL;
+		if( strReason && nReason_size > 0 )
+		{
+			/* send content */
+			content = nopoll_new( char , nReason_size + 3 );
+			if( content )
+			{
+				nopoll_set_16bit( nStatus , content );
+				memcpy( content + 2 , strReason , nReason_size );
+			} /* end if */
+		} /* end if */
+
+		  /* send close without reason */
+		nopoll_conn_send_frame( strConn , nopoll_true /* has_fin */ ,
+			/* masked */
+			strConn->role == NOPOLL_ROLE_CLIENT , NOPOLL_CLOSE_FRAME ,
+			/* content size and content */
+			nReason_size > 0 ? nReason_size + 2 : 0 , content ,
+			/* sleep in header */
+			0 );
+
+		/* release content (if defined) */
+		nopoll_free( content );
+
+		/* call to shutdown connection */
+		nopoll_conn_shutdown( strConn );
+	} /* end if */
+
+	  /* unregister connection from context */
+	nRefs = nopoll_conn_ref_count( strConn );
+	nopoll_ctx_unregister_conn( strConn->ctx , strConn );
+
+	/* avoid calling next unref in the case not enough references
+	* are found */
+	if( nRefs <= 1 )
+		return;
+
+	/* call to unref connection */
+	nopoll_conn_unref( strConn );
+
+	return;
 }

@@ -76,13 +76,13 @@ bool les_ssl_handshake_check_listener( LES_SSL_Context* pCtx , LES_SSL_Conn* pCo
 			strProtocol = pConn->strProtocols;
 
 		/* send accept header accepting protocol requested by the user */
-		strReply = les_ssl_printfv( "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n\r\n" ,
+		strReply = les_ssl_string_printfv( "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n\r\n" ,
 			strAccept_key , strProtocol );
 	}
 	else
 	{
 		/* send accept header without telling anything about protocols */
-		strReply = les_ssl_printfv( "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n" ,
+		strReply = les_ssl_string_printfv( "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n" ,
 			strAccept_key );
 	}
 
@@ -195,17 +195,11 @@ void les_ssl_handshake_check( LES_SSL_Conn* pConn )
 
 	/* flag connection as ready: now we can get messages */
 	if( bResult )
-	{
 		pConn->bHandshake_ok = true;
-	}
 	else
-	{
 		les_ssl_conn_shutdown( pConn );
-	}
-
-	return;
 }
-int les_ssl_complete_handshake_listener( LES_SSL_Context* pCctx , LES_SSL_Conn* pConn , char* strBuffer , int nBuffer_size )
+int les_ssl_complete_handshake_listener( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn , char* strBuffer , size_t nBuffer_size )
 {
 	char* strHeader = NULL;
 	char* strValue = NULL;
@@ -216,68 +210,148 @@ int les_ssl_complete_handshake_listener( LES_SSL_Context* pCctx , LES_SSL_Conn* 
 		/* get url method */
 		les_ssl_conn_get_http_url( pConn , strBuffer , nBuffer_size , "GET" , &pConn->strGet_url );
 		return 1;
-	} /* end if */
+	}
 
-	  /* get mime header */
-	if( !nopoll_conn_get_mime_header( ctx , conn , buffer , buffer_size , &header , &value ) )
+	/* get mime header */
+	if( !les_ssl_conn_get_mime_header( pCtx , pConn , strBuffer , nBuffer_size , &strHeader , &strValue ) )
 	{
-		nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Failed to acquire mime header from remote peer during handshake, closing connection" );
-		nopoll_conn_shutdown( conn );
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Failed to acquire mime header from remote peer during handshake, closing connection" );
+		les_ssl_conn_shutdown( pConn );
 		return 0;
 	}
 
 	/* ok, process here predefined headers */
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Host" , conn->host_name ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue 
+		, "Host" , pConn->strHost_name ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Upgrade" , INT_TO_PTR( conn->handshake->upgrade_websocket ) ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Upgrade" 
+		, INT_TO_PTR( pConn->pHandshake->bUpgrade_websocket ) ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Connection" , INT_TO_PTR( conn->handshake->connection_upgrade ) ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Connection" , 
+		INT_TO_PTR( pConn->pHandshake->bConnection_upgrade ) ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Sec-WebSocket-Key" , conn->handshake->websocket_key ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Sec-WebSocket-Key" 
+		, pConn->pHandshake->strWebsocket_key ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Origin" , conn->origin ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Origin" , pConn->strOrigin ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Sec-WebSocket-Protocol" , conn->protocols ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Sec-WebSocket-Protocol" , pConn->strProtocols ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Sec-WebSocket-Version" , conn->handshake->websocket_version ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Sec-WebSocket-Version" 
+		, pConn->pHandshake->strWebsocket_version ) )
 		return 0;
-	if( nopoll_conn_check_mime_header_repeated( conn , header , value , "Cookie" , conn->handshake->cookie ) )
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Cookie" , pConn->pHandshake->strCookie ) )
 		return 0;
 
 	/* set the value if required */
-	if( strcasecmp( header , "Host" ) == 0 )
-		conn->host_name = value;
-	else if( strcasecmp( header , "Sec-Websocket-Key" ) == 0 )
-		conn->handshake->websocket_key = value;
-	else if( strcasecmp( header , "Origin" ) == 0 )
-		conn->origin = value;
-	else if( strcasecmp( header , "Sec-Websocket-Protocol" ) == 0 )
-		conn->protocols = value;
-	else if( strcasecmp( header , "Sec-Websocket-Version" ) == 0 )
-		conn->handshake->websocket_version = value;
-	else if( strcasecmp( header , "Upgrade" ) == 0 )
+	if( _stricmp( strHeader , "Host" ) == 0 )
+		pConn->strHost_name = strValue;
+	else if( _stricmp( strHeader , "Sec-Websocket-Key" ) == 0 )
+		pConn->pHandshake->strWebsocket_key = strValue;
+	else if( _stricmp( strHeader , "Origin" ) == 0 )
+		pConn->strOrigin = strValue;
+	else if( _stricmp( strHeader , "Sec-Websocket-Protocol" ) == 0 )
+		pConn->strProtocols = strValue;
+	else if( _stricmp( strHeader , "Sec-Websocket-Version" ) == 0 )
+		pConn->pHandshake->strWebsocket_version = strValue;
+	else if( _stricmp( strHeader , "Upgrade" ) == 0 )
 	{
-		conn->handshake->upgrade_websocket = 1;
-		nopoll_free( value );
+		pConn->pHandshake->bUpgrade_websocket = true;
+		free( strValue );
 	}
-	else if( strcasecmp( header , "Connection" ) == 0 )
+	else if( _stricmp( strHeader , "Connection" ) == 0 )
 	{
-		conn->handshake->connection_upgrade = 1;
-		nopoll_free( value );
+		pConn->pHandshake->bConnection_upgrade = true;
+		free( strValue );
 	}
-	else if( strcasecmp( header , "Cookie" ) == 0 )
+	else if( _stricmp( strHeader , "Cookie" ) == 0 )
 	{
 		/* record cookie so it can be used by the application level */
-		conn->handshake->cookie = value;
+		pConn->pHandshake->strCookie = strValue;
 	}
 	else
 	{
 		/* release value, no body claimed it */
-		nopoll_free( value );
+		free( strValue );
 	} /* end if */
 
 	  /* release the header */
-	nopoll_free( header );
+	free( strHeader );
+
+	return 1; /* continue reading lines */
+}
+int les_ssl_conn_complete_handshake_client( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn , char* strBuffer , size_t nBuffer_size )
+{
+	char* strHeader = NULL;
+	char* strValue = NULL;
+	int nIterator = 0;
+
+	/* handle content */
+	if( !pConn->pHandshake->bReceived_101 && les_ssl_ncmp( strBuffer , "HTTP/1.1 " , 9 ) )
+	{
+		nIterator = 9;
+		while( nIterator < nBuffer_size && strBuffer[nIterator] && strBuffer[nIterator] == ' ' )
+			nIterator++;
+		if( !les_ssl_ncmp( strBuffer + nIterator , "101" , 3 ) )
+		{
+			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+				, "websocket server denied connection with: %s" , strBuffer + nIterator );
+			return 0;
+		}
+
+		  /* flag that we have received HTTP/1.1 101 indication */
+		pConn->pHandshake->bReceived_101 = true;
+
+		return 1;
+	}
+
+	  /* get mime header */
+	if( !les_ssl_conn_get_mime_header( pCtx , pConn , strBuffer , nBuffer_size , &strHeader , &strValue ) )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Failed to acquire mime header from remote peer during handshake, closing connection" );
+		les_ssl_conn_shutdown( pConn );
+		return 0;
+	}
+
+	/* ok, process here predefined headers */
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Upgrade" 
+		, INT_TO_PTR( pConn->pHandshake->bUpgrade_websocket ) ) )
+		return 0;
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Connection" 
+		, INT_TO_PTR( pConn->pHandshake->bConnection_upgrade ) ) )
+		return 0;
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Sec-WebSocket-Accept" 
+		, pConn->pHandshake->strWebsocket_accept ) )
+		return 0;
+	if( les_ssl_conn_check_mime_header_repeated( pConn , strHeader , strValue , "Sec-WebSocket-Protocol" 
+		, pConn->strAccepted_protocol ) )
+		return 0;
+
+	/* set the value if required */
+	if( _stricmp( strHeader , "Sec-Websocket-Accept" ) == 0 )
+		pConn->pHandshake->strWebsocket_accept = strValue;
+	else if( _stricmp( strHeader , "Sec-Websocket-Protocol" ) == 0 )
+		pConn->strAccepted_protocol = strValue;
+	else if( _stricmp( strHeader , "Upgrade" ) == 0 )
+	{
+		pConn->pHandshake->bUpgrade_websocket = true;
+		free( strValue );
+	}
+	else if( _stricmp( strHeader , "Connection" ) == 0 )
+	{
+		pConn->pHandshake->bConnection_upgrade = true;
+		free( strValue );
+	}
+	else
+	{
+		/* release value, no body claimed it */
+		free( strValue );
+	} /* end if */
+
+	  /* release the header */
+	free( strHeader );
 
 	return 1; /* continue reading lines */
 }
@@ -287,7 +361,7 @@ void les_ssl_complete_handshake( LES_SSL_Conn* pConn )
 	if( pConn == NULL || pConn->bHandshake_ok )
 		return;
 	char strBuffer[1024] = { "" };
-	int nBuffer_size = 0;
+	size_t nBuffer_size = 0;
 	LES_SSL_Context* pCtx = pConn->pCtx;
 
 	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
@@ -341,7 +415,7 @@ void les_ssl_complete_handshake( LES_SSL_Conn* pConn )
 		else if( pConn->nRole == LES_SSL_ROLE_CLIENT )
 		{
 			/* call to complete listener handshake */
-			if( les_ssl_handshake_check_client( pCtx , pConn , strBuffer , nBuffer_size ) == 1 )
+			if( les_ssl_conn_complete_handshake_client( pCtx , pConn , strBuffer , nBuffer_size ) == 1 )
 				continue;
 		}
 		else
