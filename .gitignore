@@ -48,6 +48,7 @@
 *.res
 *.tlh
 *.sbr
+*.bsc
 
 # Redis
 *.rdb
