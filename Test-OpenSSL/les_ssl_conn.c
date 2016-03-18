@@ -148,7 +148,7 @@ void les_ssl_conn_shutdown( LES_SSL_Conn * pConn )
 	return;
 }
 
-void conn_mask_content( LES_SSL_Context* ctx , char* payload , int payload_size , char* mask , int desp )
+void les_ssl_conn_mask_content( LES_SSL_Context* ctx , char* payload , int payload_size , char* mask , int desp )
 {
 	int iter = 0;
 	int mask_index = 0;
@@ -440,67 +440,52 @@ bool les_ssl_conn_check_mime_header_repeated( LES_SSL_Conn* pConn , char* strHea
 	} 
 	return false;
 }
-void les_ssl_conn_close( LES_SSL_Conn* strConn , int nStatus , const char* strReason , int nReason_size )
+void les_ssl_conn_close( LES_SSL_Conn* pConn , int nStatus , const char* strReason , int nReason_size )
 {
 	int nRefs = 0;
-	char * content;
-#if defined(SHOW_DEBUG_LOG)
-	const char * role = "unknown";
-#endif
+	char* strContent = NULL;
 
 	/* check input data */
-	if( strConn == NULL )
+	if( pConn == NULL )
 		return;
 
-#if defined(SHOW_DEBUG_LOG)
-	if( conn->role == NOPOLL_ROLE_LISTENER )
-		role = "listener";
-	else if( conn->role == NOPOLL_ROLE_MAIN_LISTENER )
-		role = "master-listener";
-	else if( conn->role == NOPOLL_ROLE_UNKNOWN )
-		role = "unknown";
-	else if( conn->role == NOPOLL_ROLE_CLIENT )
-		role = "client";
-
-	nopoll_log( conn->ctx , NOPOLL_LEVEL_DEBUG , "Calling to close close id=%d (session %d, refs: %d, role: %s)" ,
-		conn->id , conn->session , conn->refs , role );
-#endif
-	if( strConn->session != NOPOLL_INVALID_SOCKET )
+	if( pConn->sSession != INVALID_SOCKET )
 	{
-		nopoll_log( strConn->ctx , NOPOLL_LEVEL_DEBUG , "requested proper connection close id=%d (session %d)" , strConn->id , strConn->session );
+		les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "requested proper connection close id=%d (session %d)" , pConn->nId , pConn->sSession );
 
 		/* build reason indication */
-		content = NULL;
+		strContent = NULL;
 		if( strReason && nReason_size > 0 )
 		{
 			/* send content */
-			content = nopoll_new( char , nReason_size + 3 );
-			if( content )
+			strContent = calloc_new( char , nReason_size + 3 );
+			if( strContent )
 			{
-				nopoll_set_16bit( nStatus , content );
-				memcpy( content + 2 , strReason , nReason_size );
-			} /* end if */
-		} /* end if */
+				set_16bit( nStatus , strContent );
+				memcpy( strContent + 2 , strReason , nReason_size );
+			}
+		}
 
-		  /* send close without reason */
-		nopoll_conn_send_frame( strConn , nopoll_true /* has_fin */ ,
+		/* send close without reason */
+		les_ssl_conn_send_frame( pConn , true /* has_fin */ ,
 			/* masked */
-			strConn->role == NOPOLL_ROLE_CLIENT , NOPOLL_CLOSE_FRAME ,
+			pConn->nRole == LES_SSL_ROLE_CLIENT , LES_SSL_CLOSE_FRAME ,
 			/* content size and content */
-			nReason_size > 0 ? nReason_size + 2 : 0 , content ,
+			nReason_size > 0 ? nReason_size + 2 : 0 , strContent ,
 			/* sleep in header */
 			0 );
 
 		/* release content (if defined) */
-		nopoll_free( content );
+		free( strContent );
 
 		/* call to shutdown connection */
-		nopoll_conn_shutdown( strConn );
-	} /* end if */
+		les_ssl_conn_shutdown( pConn );
+	} 
 
 	  /* unregister connection from context */
-	nRefs = nopoll_conn_ref_count( strConn );
-	nopoll_ctx_unregister_conn( strConn->ctx , strConn );
+	nRefs = les_ssl_conn_ref_count( pConn );
+	les_ssl_ctx_unregister_conn( pConn->pCtx , pConn );
 
 	/* avoid calling next unref in the case not enough references
 	* are found */
@@ -508,7 +493,348 @@ void les_ssl_conn_close( LES_SSL_Conn* strConn , int nStatus , const char* strRe
 		return;
 
 	/* call to unref connection */
-	nopoll_conn_unref( strConn );
+	les_ssl_conn_unref( pConn );
+
+	return;
+}
+
+int les_ssl_conn_send_frame( LES_SSL_Conn * pConn , bool bFin , bool bMasked ,
+	LES_SSL_OpCode nOp_code , long lLength , voidPtr strContent , long lSleep_in_header )
+
+{
+	char strHeader[14] = { "" };
+	int nHeader_size = 0;
+	char* strSsend_buffer = NULL;
+	int nBytes_written = 0;
+	char strMask[4] = { "" };
+	unsigned int nMask_value = 0;
+	int nDesp = 0;
+	int nTries = 0;
+
+	/* check for pending send operation */
+	if( les_ssl_conn_complete_pending_write( pConn ) != 0 )
+		return -1;
+
+	/* clear header */
+	memset( strHeader , 0 , 14 );
+
+	/* set header codes */
+	if( bFin )
+		set_bit( strHeader , 7 );
+
+	if( bMasked )
+	{
+		set_bit( strHeader + 1 , 7 );
+
+		/* define a random mask */
+		nMask_value = ( unsigned int ) rand( );
+
+		memset( strMask , 0 , 4 );
+		set_32bit( nMask_value , strMask );
+	} 
+
+	if( nOp_code )
+	{
+		/* set initial 4 bits */
+		strHeader[0] |= nOp_code & 0x0f;
+	}
+
+	/* set default header size */
+	nHeader_size = 2;
+
+	/* according to message length */
+	if( lLength < 126 )
+	{
+		strHeader[1] |= lLength;
+	}
+	else if( lLength < 65535 )
+	{
+		/* set the next header length is at least 65535 */
+		strHeader[1] |= 126;
+		nHeader_size += 2;
+		/* set length into the next bytes */
+		set_16bit( lLength , strHeader + 2 );
+
+	}
+#if defined _WIN64
+	else if( lLength < 9223372036854775807 )
+	{
+		/* not supported yet */
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Unable to send the requested message, this requested is bigger "
+			"than the value that can be supported by this platform (it should be < 65k)" );
+		return -1;
+	}
+#endif
+	else
+	{
+		les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "Unable to send the requested message, this requested is bigger "
+			"than the value that can be supported by this platform (it should be < 65k)" );
+		return -1;
+	}
+
+	/* place mask */
+	if( bMasked )
+	{
+		set_32bit( nMask_value , strHeader + nHeader_size );
+		nHeader_size += 4;
+	} 
+
+	  /* allocate enough memory to send content */
+	strSsend_buffer = calloc_new( char , lLength + nHeader_size + 2 );
+	if( strSsend_buffer == NULL )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Unable to allocate memory to implement send operation" );
+		return -1;
+	} 
+
+	  /* copy content to be sent */
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+		, "Copying into the buffer %d bytes of header (total memory allocated: %d)" ,
+		nHeader_size , ( int ) lLength + nHeader_size + 1 );
+	memcpy( strSsend_buffer , strHeader , nHeader_size );
+	if( lLength > 0 )
+	{
+		memcpy( strSsend_buffer + nHeader_size , strContent , lLength );
+
+		/* mask content before sending if requested */
+		if( bMasked )
+			les_ssl_conn_mask_content( pConn->pCtx
+				, strSsend_buffer + nHeader_size , lLength , strMask , 0 );
+	}
+
+
+	/* send content */
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+		, "Mask used for this delivery: %d (about to send %d bytes)" ,
+		nopoll_get_32bit( strSsend_buffer + nHeader_size - 2 ) , ( int ) lLength + nHeader_size );
+	/* clear errno status before writting */
+	nDesp = 0;
+	nTries = 0;
+	while( true )
+	{
+		/* try to write bytes */
+		if( lSleep_in_header == 0 )
+		{
+			nBytes_written = pConn->pSend( pConn , strSsend_buffer + nDesp , lLength + nHeader_size - nDesp );
+		}
+		else
+		{
+			les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+				, "Found sleep in header indication, sending header: %d bytes (waiting %ld)" , nHeader_size , lSleep_in_header );
+			nBytes_written = pConn->pSend( pConn , strSsend_buffer , nHeader_size );
+			if( nBytes_written == nHeader_size )
+			{
+				/* sleep after header ... */
+				Sleep( lSleep_in_header / 1000 );
+
+				/* now send the rest of the content (without the header) */
+				nBytes_written = pConn->pSend( pConn , strSsend_buffer + nHeader_size , lLength );
+				les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+					, "Rest of content written %d (header size: %d, length: %d)" ,
+					nBytes_written , nHeader_size , lLength );
+				nBytes_written = lLength + nHeader_size;
+				les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+					, "final bytes_written %d" , nBytes_written );
+			}
+			else
+			{
+				les_ssl_print( LES_SSL_LOGGING_ERR| LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+					, "Requested to write %d bytes for the header but %d were written" ,
+					nHeader_size , nBytes_written );
+				return -1;
+			} 
+		} 
+
+		if( ( nBytes_written + nDesp ) != ( lLength + nHeader_size ) )
+		{
+			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+				, "Requested to write %d bytes but found %d written "
+				"(masked? %d, mask: %u, header size: %d, length: %d), errno = %d : %s" ,
+				( int ) lLength + nHeader_size - nDesp , nBytes_written , bMasked 
+				, nMask_value , nHeader_size , ( int ) lLength , errno , strerror( errno ) );
+		}
+		else
+		{
+			/* accomulate bytes written to continue */
+			if( nBytes_written > 0 )
+				nDesp += nBytes_written;
+
+			les_ssl_print(  LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+				, "Bytes written to the wire %d (masked? %d, mask: %u, header size: %d, length: %d)" ,
+				nBytes_written , bMasked , nMask_value , nHeader_size , ( int ) lLength );
+			break;
+		} 
+
+		  /* accomulate bytes written to continue */
+		if( nBytes_written > 0 )
+			nDesp += nBytes_written;
+
+		/* increase tries */
+		nTries++;
+
+		if( ( errno != 0 ) || nTries > 50 )
+		{
+			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+				, "Found errno=%d (%s) value while trying to bytes to the WebSocket conn-id=%d or max tries reached=%d" ,
+				errno , strerror( errno ) , pConn->nId , nTries );
+			break;
+		} 
+
+		/* wait a bit */
+		Sleep( 10 );
+
+	} /* end while */
+
+	  /* record pending write bytes */
+	pConn->nPending_write_bytes = lLength + nHeader_size - nDesp;
+
+	/* check pending bytes for the next operation */
+	if( pConn->nPending_write_bytes > 0 )
+	{
+		pConn->strPending_write = calloc_new( char , pConn->nPending_write_bytes );
+		memcpy( pConn->strPending_write , strSsend_buffer + lLength + nHeader_size - pConn->nPending_write_bytes
+			, pConn->nPending_write_bytes );
+
+		les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "Stored %d bytes starting from %d out of %d bytes (header size: %d)" ,
+			pConn->nPending_write_bytes , lLength + nHeader_size - pConn->nPending_write_bytes 
+			, lLength + nHeader_size , nHeader_size );
+	} 
+
+
+	/* release memory */
+	free( strSsend_buffer );
+
+	/* report at least what was written */
+	if( nDesp - nHeader_size > 0 )
+		return nDesp - nHeader_size;
+
+	/* report last operation */
+	return nBytes_written;
+}
+
+int les_ssl_conn_complete_pending_write( LES_SSL_Conn* pConn )
+{
+	int nBytes_written = 0;
+	char* strReference = NULL;
+	int nPending_bytes = 0;
+
+	if( pConn == NULL || pConn->strPending_write == NULL )
+		return 0;
+
+	/* simple implementation */
+	nBytes_written = pConn->pSend( pConn , pConn->strPending_write , pConn->nPending_write_bytes );
+	if( nBytes_written == pConn->nPending_write_bytes )
+	{
+		les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "Completed pending write operation with bytes=%d" , nBytes_written );
+		free( pConn->strPending_write );
+		pConn->strPending_write = NULL;
+		return nBytes_written;
+	}
+
+	if( nBytes_written > 0 )
+	{
+		/* bytes written but not everything */
+		nPending_bytes = pConn->nPending_write_bytes - nBytes_written;
+		strReference = calloc_new( char , nPending_bytes );
+		memcpy( strReference , pConn->strPending_write + nBytes_written , nPending_bytes );
+		free( pConn->strPending_write );
+		pConn->strPending_write = strReference;
+		return nBytes_written;
+	}
+
+	les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+		, "Found complete write operation didn't finish well, result=%d, errno=%d, conn-id=%d" ,
+		nBytes_written , errno , pConn->nId );
+	return nBytes_written;
+}
+
+void les_ssl_conn_unref( LES_SSL_Conn* pConn )
+{
+	if( pConn == NULL )
+		return;
+
+	/* acquire here the mutex */
+	les_ssl_mutex_lock( pConn->pRef_mutex );
+
+	pConn->nRefs--;
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+		, "Releasing connection id %d reference, current ref count status is: %d" ,
+		pConn->nId , pConn->nRefs );
+	if( pConn->nRefs != 0 )
+	{
+		/* release here the mutex */
+		les_ssl_mutex_unlock( pConn->pRef_mutex );
+		return;
+	}
+	/* release here the mutex */
+	les_ssl_mutex_unlock( pConn->pRef_mutex );
+
+	/* release message */
+	if( pConn->pPending_msg )
+		nopoll_msg_unref( pConn->pPending_msg );
+
+	/* release ctx */
+	if( pConn->pCtx )
+	{
+		les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Released context refs, now: %d" , pConn->pCtx->nRefs );
+		les_ssl_ctx_unref( pConn->pCtx );
+	} /* end if */
+	pConn->pCtx = NULL;
+
+	/* free all internal strings */
+	free( pConn->strHost );
+	free( pConn->strPort );
+	free( pConn->strHost_name );
+	free( pConn->strOrigin );
+	free( pConn->strProtocols );
+	free( pConn->strAccepted_protocol );
+	free( pConn->strGet_url );
+
+	/* close reason if any */
+	free( pConn->strPeer_close_reason );
+
+	/* release TLS certificates */
+	free( pConn->strCertificate );
+	free( pConn->strPrivate_key );
+	free( pConn->strChain_certificate );
+
+	/* release uncomplete message */
+	if( pConn->pPrevious_msg )
+		nopoll_msg_unref( pConn->pPrevious_msg );
+
+	if( pConn->pSsl )
+		SSL_free( pConn->pSsl );
+	if( pConn->pSsl_ctx )
+		SSL_CTX_free( pConn->pSsl_ctx );
+
+	/* release handshake internal data */
+	if( pConn->pHandshake )
+	{
+		free( pConn->pHandshake->strWebsocket_key );
+		free( pConn->pHandshake->strWebsocket_version );
+		free( pConn->pHandshake->strWebsocket_accept );
+		free( pConn->pHandshake->strExpected_accept );
+		free( pConn->pHandshake->strCookie );
+		free( pConn->pHandshake );
+	}
+
+	  /* release connection options if defined and reuse flag is not defined */
+	if( pConn->pOpts && !pConn->pOpts->bReuse )
+		les_ssl_conn_opts_free( pConn->pOpts );
+
+	/* release pending write buffer */
+	free( pConn->strPending_write );
+
+	/* release mutex */
+	les_ssl_mutex_destroy( pConn->pRef_mutex );
+
+	free( pConn );
 
 	return;
 }

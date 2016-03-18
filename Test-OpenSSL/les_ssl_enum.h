@@ -61,4 +61,39 @@ typedef enum
 	LES_SSL_METHOD_TLSV1_1 = 5
 #endif
 } SslProtocol ;
+
+typedef enum
+{
+	/**
+	* @brief Support to model unknown op code.
+	*/
+	LES_SSL_UNKNOWN_OP_CODE = -1 ,
+	/**
+	* @brief Denotes a continuation frame.
+	*/
+	LES_SSL_CONTINUATION_FRAME = 0 ,
+	/**
+	* @brief Denotes a text frame (utf-8 content) and the first
+	* frame of the message.
+	*/
+	LES_SSL_TEXT_FRAME = 1 ,
+	/**
+	* @brief Denotes a binary frame and the first frame of the
+	* message.
+	*/
+	LES_SSL_BINARY_FRAME = 2 ,
+	/**
+	* @brief Denotes a close frame request.
+	*/
+	LES_SSL_CLOSE_FRAME = 8 ,
+	/**
+	* @brief Denotes a ping frame (used to ring test the circuit
+	* and to keep alive the connection).
+	*/
+	LES_SSL_PING_FRAME = 9 ,
+	/**
+	* @brief Denotes a pong frame (reply to ping request).
+	*/
+	LES_SSL_PONG_FRAME = 10
+} LES_SSL_OpCode;
 #endif

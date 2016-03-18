@@ -57,9 +57,6 @@ bool test_01( );
 /**********************************Macro**********************************/
 #define calloc_new(type, count) (type *) calloc (count, sizeof (type))
 /*********************************End*************************************/
-bool les_ssl_ncmp( const char * string1 , const char * string2 , int bytes );
-bool base64_encode( const char* strContent , int nLen ,	char* strOutput , size_t* sOutput );
-bool base64_decode( const char* strContent , int nLen , char* strOutput , int* sOutput );
-
+#include "Test-OpenSSL/les_ssl_code.h"
 #include "Test-OpenSSL/les_ssl_lock.h"
 #include "Test-OpenSSL/les_ssl_logging.h"

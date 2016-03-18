@@ -1,26 +1,6 @@
 #include "les_ssl_struct.h"
 #include "les_ssl_context.h"
 
-
-void set_32bit( int value , char * buffer )
-{
-	buffer[0] = ( value & 0x00ff000000 ) >> 24;
-	buffer[1] = ( value & 0x0000ff0000 ) >> 16;
-	buffer[2] = ( value & 0x000000ff00 ) >> 8;
-	buffer[3] = value & 0x00000000ff;
-
-	return;
-}
-int get_32bit( const char * buffer )
-{
-	int part1 = ( int ) ( buffer[0] & 0x0ff ) << 24;
-	int part2 = ( int ) ( buffer[1] & 0x0ff ) << 16;
-	int part3 = ( int ) ( buffer[2] & 0x0ff ) << 8;
-	int part4 = ( int ) ( buffer[3] & 0x0ff );
-
-	return part1 | part2 | part3 | part4;
-}
-
 /**
 * @brief Creates an empty Nopoll context.
 */
@@ -109,4 +89,45 @@ void les_ssl_ctx_unref( LES_SSL_Context* ctx )
 int les_ssl_ctx_conns( LES_SSL_Context * ctx )
 {
 	return ctx->nConn_num;
+}
+void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
+{
+	int nIterator = 0;
+
+	if( pCtx == NULL || pConn == NULL )
+		return;
+
+	/* acquire mutex here */
+	les_ssl_mutex_lock( pCtx->pRef_mutex );
+
+	/* find the connection and remove it from the array */
+	nIterator = 0;
+	while( nIterator < pCtx->nConn_length )
+	{
+
+		/* check the connection reference */
+		if( pCtx->pConn_list && pCtx->pConn_list[nIterator] && pCtx->pConn_list[nIterator]->nId == pConn->nId )
+		{
+			/* remove reference */
+			pCtx->pConn_list[nIterator] = NULL;
+
+			/* update connection list number */
+			pCtx->nConn_num--;
+
+			/* release */
+			nopoll_mutex_unlock( pCtx->pRef_mutex );
+
+			/* acquire a reference to the conection */
+			nopoll_conn_unref( pConn );
+
+			break;
+		}
+
+		nIterator++;
+	}
+
+	  /* release mutex here */
+	les_ssl_mutex_unlock( pCtx->pRef_mutex );
+
+	return;
 }

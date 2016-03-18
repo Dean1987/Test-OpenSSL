@@ -64,6 +64,7 @@
 /ipch
 /jpeg2ps-1.9-1-src
 /bin/__pycache__
+/noPoll
 
 # Test Files
 *.jpg

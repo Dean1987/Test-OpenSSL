@@ -16,6 +16,7 @@ void InitTcp( )
 
 int main( )
 {
+	int nSize = sizeof( voidPtr );
 	startLogging( );
 	InitTcp( );
 	if( test_01_base64( ) )

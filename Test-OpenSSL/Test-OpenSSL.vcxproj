@@ -77,8 +77,8 @@
     <LibraryPath>../../../bakup/openssl-1.0.1s/out32dll/;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>../../../bakup/openssl-1.0.1s/inc32/;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
-    <LibraryPath>../../../bakup/openssl-1.0.1s/out32dll/;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64</LibraryPath>
+    <IncludePath>../../openssl-1.0.1s/inc32/;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <LibraryPath>../../openssl-1.0.1s/out32dll/;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64</LibraryPath>
     <LibraryWPath>../dll/;$(LibraryWPath)</LibraryWPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -135,6 +135,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\Header.h" />
+    <ClInclude Include="les_ssl_code.h" />
     <ClInclude Include="les_ssl_conn.h" />
     <ClInclude Include="les_ssl_context.h" />
     <ClInclude Include="les_ssl_conn_opts.h" />
@@ -148,7 +149,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\main.c" />
-    <ClCompile Include="..\base64.c" />
+    <ClCompile Include="..\les_ssl_code.c" />
     <ClCompile Include="les_ssl_conn.c" />
     <ClCompile Include="les_ssl_conn_opts.c" />
     <ClCompile Include="les_ssl_context.c" />
