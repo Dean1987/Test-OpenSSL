@@ -47,6 +47,7 @@
 *.lastbuildstate
 *.res
 *.tlh
+*.sbr
 
 # Redis
 *.rdb
