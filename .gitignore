@@ -1,0 +1,74 @@
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+
+# VS
+*.sdf
+*.suo
+*.opendb
+*.user
+*.log
+*.ilk
+*.ipdb
+*.pdb
+*.iobj
+*.exp
+*.tlog
+*.idb
+*.lastbuildstate
+*.res
+*.tlh
+
+# Redis
+*.rdb
+
+# Python
+*.py~
+
+# Dir
+/.svn
+/db_bak
+/doc
+/dump
+/ipch
+/jpeg2ps-1.9-1-src
+/bin/__pycache__
+
+# Test Files
+*.jpg
+*.pdf
+
+# Eclipse project file
+.project
+.pydevproject
+.settings/
+.vs
