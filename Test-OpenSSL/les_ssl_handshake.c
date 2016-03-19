@@ -205,7 +205,7 @@ int les_ssl_complete_handshake_listener( LES_SSL_Context* pCtx , LES_SSL_Conn* p
 	char* strValue = NULL;
 
 	/* handle content */
-	if( les_ssl_ncmp( strBuffer , "GET " , 4 ) )
+	if( strncmp( strBuffer , "GET " , 4 ) == 0 )
 	{
 		/* get url method */
 		les_ssl_conn_get_http_url( pConn , strBuffer , nBuffer_size , "GET" , &pConn->strGet_url );
@@ -288,12 +288,12 @@ int les_ssl_conn_complete_handshake_client( LES_SSL_Context* pCtx , LES_SSL_Conn
 	int nIterator = 0;
 
 	/* handle content */
-	if( !pConn->pHandshake->bReceived_101 && les_ssl_ncmp( strBuffer , "HTTP/1.1 " , 9 ) )
+	if( !pConn->pHandshake->bReceived_101 && strncmp( strBuffer , "HTTP/1.1 " , 9 ) == 0 )
 	{
 		nIterator = 9;
 		while( nIterator < nBuffer_size && strBuffer[nIterator] && strBuffer[nIterator] == ' ' )
 			nIterator++;
-		if( !les_ssl_ncmp( strBuffer + nIterator , "101" , 3 ) )
+		if( strncmp( strBuffer + nIterator , "101" , 3 ) != 0 )
 		{
 			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
 				, "websocket server denied connection with: %s" , strBuffer + nIterator );
@@ -400,7 +400,7 @@ void les_ssl_complete_handshake( LES_SSL_Conn* pConn )
 
 		/* check if we have received the end of the
 		websocket client handshake */
-		if( nBuffer_size == 2 && les_ssl_ncmp( strBuffer , "\r\n" , 2 ) )
+		if( nBuffer_size == 2 && strncmp( strBuffer , "\r\n" , 2 ) == 0 )
 		{
 			les_ssl_handshake_check( pConn );
 			return;

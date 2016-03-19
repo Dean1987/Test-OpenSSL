@@ -32,31 +32,6 @@ int get_32bit( const char * buffer )
 	return part1 | part2 | part3 | part4;
 }
 
-bool les_ssl_ncmp( const char * string1 , const char * string2 , int bytes )
-{
-	int iterator;
-	if( bytes <= 0 )
-		return false;
-	if( string1 == NULL && string2 == NULL )
-		return true;
-	if( string1 == NULL || string2 == NULL )
-		return false;
-
-	/* next position */
-	iterator = 0;
-	while( string1[iterator] &&
-		string2[iterator] &&
-		iterator < bytes )
-	{
-		if( string1[iterator] != string2[iterator] )
-			return false;
-		iterator++;
-	} /* end while */
-
-	  /* last check, ensure both ends with 0 */
-	return iterator == bytes;
-}
-
 bool base64_encode( const char* strContent , int nLen ,
                          char* strOutput , size_t* sOutput )
 {

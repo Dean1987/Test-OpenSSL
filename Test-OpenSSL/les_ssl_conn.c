@@ -4,6 +4,7 @@
 #include "les_ssl_conn_opts.h"
 #include "les_ssl_handshake.h"
 #include "les_ssl_string.h"
+#include "les_ssl_msg.h"
 
 //设置非延时
 bool conn_set_sock_tcp_nodelay( SOCKET sSocket , bool bEnable )
@@ -609,7 +610,7 @@ int les_ssl_conn_send_frame( LES_SSL_Conn * pConn , bool bFin , bool bMasked ,
 	/* send content */
 	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
 		, "Mask used for this delivery: %d (about to send %d bytes)" ,
-		nopoll_get_32bit( strSsend_buffer + nHeader_size - 2 ) , ( int ) lLength + nHeader_size );
+		get_32bit( strSsend_buffer + nHeader_size - 2 ) , ( int ) lLength + nHeader_size );
 	/* clear errno status before writting */
 	nDesp = 0;
 	nTries = 0;
@@ -776,7 +777,7 @@ void les_ssl_conn_unref( LES_SSL_Conn* pConn )
 
 	/* release message */
 	if( pConn->pPending_msg )
-		nopoll_msg_unref( pConn->pPending_msg );
+		les_ssl_msg_unref( pConn->pPending_msg );
 
 	/* release ctx */
 	if( pConn->pCtx )
@@ -806,7 +807,7 @@ void les_ssl_conn_unref( LES_SSL_Conn* pConn )
 
 	/* release uncomplete message */
 	if( pConn->pPrevious_msg )
-		nopoll_msg_unref( pConn->pPrevious_msg );
+		les_ssl_msg_unref( pConn->pPrevious_msg );
 
 	if( pConn->pSsl )
 		SSL_free( pConn->pSsl );

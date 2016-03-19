@@ -51,6 +51,9 @@
     <ClInclude Include="les_ssl_code.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="les_ssl_msg.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\main.c">
@@ -83,7 +86,10 @@
     <ClCompile Include="les_ssl_string.c">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\les_ssl_code.c">
+    <ClCompile Include="les_ssl_msg.c">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="les_ssl_code.c">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

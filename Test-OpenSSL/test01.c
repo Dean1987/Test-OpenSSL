@@ -74,18 +74,18 @@ bool test_01_masking( )
 	set_32bit( mask_value , mask );
 
 	memcpy( buffer , "This is a test value" , 20 );
-	conn_mask_content( ctx , buffer , 20 , mask , 0 );
+	les_ssl_conn_mask_content( ctx , buffer , 20 , mask , 0 );
 
-	if( les_ssl_ncmp( buffer , "This is a test value" , 20 ) )
+	if( strncmp( buffer , "This is a test value" , 20 ) == 0 )
 	{
 		printf( "ERROR: expected to find different values after masking but found the same..\n" );
 		return false;
 	}
 
 	///* revert changes */
-	conn_mask_content( ctx , buffer , 20 , mask , 0 );
+	les_ssl_conn_mask_content( ctx , buffer , 20 , mask , 0 );
 
-	if( !les_ssl_ncmp( buffer , "This is a test value" , 20 ) )
+	if( strncmp( buffer , "This is a test value" , 20 ) != 0 )
 	{
 		printf( "ERROR: expected to find SAME values after masking but found the same..\n" );
 		return false;
@@ -171,7 +171,7 @@ bool test_01( )
 	} 
 
 	//  /* finish connection */
-	les_ssl_conn_close( conn );
+	les_ssl_conn_close( conn , 0 , NULL , 0 );
 
 	///* finish */
 	les_ssl_ctx_unref( ctx );

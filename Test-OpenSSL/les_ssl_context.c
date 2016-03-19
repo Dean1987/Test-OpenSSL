@@ -1,5 +1,6 @@
 #include "les_ssl_struct.h"
 #include "les_ssl_context.h"
+#include "les_ssl_conn.h"
 
 /**
 * @brief Creates an empty Nopoll context.
@@ -104,7 +105,6 @@ void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
 	nIterator = 0;
 	while( nIterator < pCtx->nConn_length )
 	{
-
 		/* check the connection reference */
 		if( pCtx->pConn_list && pCtx->pConn_list[nIterator] && pCtx->pConn_list[nIterator]->nId == pConn->nId )
 		{
@@ -115,10 +115,10 @@ void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
 			pCtx->nConn_num--;
 
 			/* release */
-			nopoll_mutex_unlock( pCtx->pRef_mutex );
+			les_ssl_mutex_unlock( pCtx->pRef_mutex );
 
 			/* acquire a reference to the conection */
-			nopoll_conn_unref( pConn );
+			les_ssl_conn_unref( pConn );
 
 			break;
 		}
@@ -126,8 +126,6 @@ void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
 		nIterator++;
 	}
 
-	  /* release mutex here */
+	/* release mutex here */
 	les_ssl_mutex_unlock( pCtx->pRef_mutex );
-
-	return;
 }
