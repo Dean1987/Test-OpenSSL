@@ -21,5 +21,6 @@ int les_ssl_conn_complete_pending_write( LES_SSL_Conn* pConn );
 int les_ssl_conn_send_frame( LES_SSL_Conn * strConn , bool bFin , bool bMasked ,
 	LES_SSL_OpCode nOp_code , long lLength , voidPtr strContent , long lSleep_in_header );
 void les_ssl_conn_close( LES_SSL_Conn* pConn , int nStatus , const char* strReason , int nReason_size );
+bool les_ssl_conn_ref( LES_SSL_Conn* pConn );
 void les_ssl_conn_unref( LES_SSL_Conn* pConn );
 #endif

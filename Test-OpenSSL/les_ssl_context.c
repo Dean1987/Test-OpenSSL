@@ -87,10 +87,89 @@ void les_ssl_ctx_unref( LES_SSL_Context* ctx )
 	free( ctx );
 	return;
 }
-int les_ssl_ctx_conns( LES_SSL_Context * ctx )
+
+int les_ssl_ctx_conns( LES_SSL_Context* pCtx )
 {
-	return ctx->nConn_num;
+	if( pCtx == NULL )
+		return -1;
+	return pCtx->nConn_num;
 }
+
+bool les_ssl_ctx_register_conn( LES_SSL_Context* pCtx ,	LES_SSL_Conn* pConn )
+{
+	if( pCtx == NULL || pConn == NULL )
+		return false;
+	int nIterator = 0;
+
+
+	/* acquire mutex here */
+	les_ssl_mutex_lock( pCtx->pRef_mutex );
+
+	/* get connection */
+	pConn->nId = pCtx->nConn_id;
+	pCtx->nConn_id++;
+
+	/* register connection */
+	nIterator = 0;
+	while( nIterator < pCtx->nConn_length )
+	{
+		/* register reference */
+		if( pCtx->pConn_list[nIterator] == 0 )
+		{
+			pCtx->pConn_list[nIterator] = pConn;
+
+			/* update connection list number */
+			pCtx->nConn_num++;
+
+			les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+				, "registered connection id %d, role: %d" , pConn->nId , pConn->nRole );
+
+			/* release */
+			les_ssl_mutex_unlock( pCtx->pRef_mutex );
+
+			/* acquire reference */
+			les_ssl_ctx_ref( pCtx );
+
+			/* acquire a reference to the conection */
+			les_ssl_conn_ref( pConn );
+
+			/* release mutex here */
+			return true;
+		}
+		nIterator++;
+	}
+
+	/* if reached this place it means no more buckets are
+	* available, acquire more memory (increase 10 by 10) */
+	pCtx->nConn_length += 10;
+	pCtx->pConn_list = ( LES_SSL_Conn** ) realloc( pCtx->pConn_list 
+		, sizeof( LES_SSL_Conn * ) * ( pCtx->nConn_length ) );
+	if( pCtx->pConn_list == NULL )
+	{
+		/* release mutex */
+		les_ssl_mutex_unlock( pCtx->pRef_mutex );
+
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "General connection registration error, memory acquisition failed.." );
+		return false;
+	}
+
+	/* clear new positions */
+	nIterator = ( pCtx->nConn_length - 10 );
+	while( nIterator < pCtx->nConn_length )
+	{
+		pCtx->pConn_list[nIterator] = 0;
+		/* next position */
+		nIterator++;
+	} /* end while */
+
+	  /* release mutex here */
+	les_ssl_mutex_unlock( pCtx->pRef_mutex );
+
+	/* ok, now register connection because we have memory */
+	return les_ssl_ctx_register_conn( pCtx , pConn );
+}
+
 void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
 {
 	int nIterator = 0;
@@ -128,4 +207,19 @@ void les_ssl_ctx_unregister_conn( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn )
 
 	/* release mutex here */
 	les_ssl_mutex_unlock( pCtx->pRef_mutex );
+}
+bool les_ssl_ctx_ref( LES_SSL_Context* pCtx )
+{
+	if( pCtx == NULL )
+		return false;
+
+	/* acquire mutex here */
+	les_ssl_mutex_lock( pCtx->pRef_mutex );
+
+	pCtx->nRefs++;
+
+	/* release mutex here */
+	les_ssl_mutex_unlock( pCtx->pRef_mutex );
+
+	return true;
 }
