@@ -1,6 +1,15 @@
 #include "../Header.h"
 #include "les_ssl_string.h"
 
+int les_ssl_cmp( const char* str1 , const char* str2 )
+{
+	if( str1 == NULL && str2 == NULL )
+		return 0;
+	if( str1 == NULL || str2 == NULL )
+		return 1;
+	return strcmp( str1 , str2 );
+}
+
 int get_vprintf_len( const char* format , va_list args )
 {
 	if( format == NULL )
@@ -30,8 +39,10 @@ char* les_ssl_string_printfv( const char* chunk , ... )
 
 	/* copy current size */
 
+	va_start( args , chunk );
 	nSize = _vsnprintf_s( strResult , nSize + 1 , nSize , chunk , args );
-	
+	va_end( args );
+
 	return strResult;
 }
 void les_ssl_string_trim( char* chunk , size_t* trimmed )

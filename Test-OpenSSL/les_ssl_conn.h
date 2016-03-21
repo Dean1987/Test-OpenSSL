@@ -2,8 +2,9 @@
 #define _LES_SSL_CONN_H
 #include "../Header.h"
 
-LES_SSL_Conn* les_ssl_conn_new( LES_SSL_Context* ctx , const char* host_ip , const char* host_port
-	, const char* host_name , const char* get_url , const char* protocols , const char* origin );
+LES_SSL_Conn* les_ssl_conn_new( LES_SSL_Context* pCtx , const char* strHost_ip , const char* strHost_port
+	, const char* strHost_name , const char* strGet_url , const char* strProtocols , const char* strOrigin
+	, LES_SSL_ConnOpts* pOptions , bool bEnable_tls );
 void les_ssl_conn_shutdown( LES_SSL_Conn * pConn );
 bool les_ssl_conn_is_ok( LES_SSL_Conn* pConn );
 bool les_ssl_conn_is_ready( LES_SSL_Conn* pConn );

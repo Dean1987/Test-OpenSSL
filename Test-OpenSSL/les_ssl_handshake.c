@@ -152,7 +152,7 @@ bool les_ssl_handshake_check_client( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn
 	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE , "Checking accept key from listener.." );
 	strAccept = les_ssl_produce_accept_key( pCtx , pConn->pHandshake->strWebsocket_key );
 
-	bResult = strcmp( strAccept , pConn->pHandshake->strWebsocket_key ) == 0;
+	bResult = les_ssl_cmp( strAccept , pConn->pHandshake->strWebsocket_key ) == 0;
 	if( !bResult )
 	{
 		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 

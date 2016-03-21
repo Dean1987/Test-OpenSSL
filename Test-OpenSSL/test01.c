@@ -21,7 +21,7 @@ bool test_01_base64( )
 		} /* end if */
 
 		  /* check result */
-		if( strcmp( buffer , "VGhpcyBpcyBhIHRlc3Q=" ) != 0 )
+		if( les_ssl_cmp( buffer , "VGhpcyBpcyBhIHRlc3Q=" ) != 0 )
 		{
 			printf( "ERROR: expected to find encoded base64 string %s but found %s..\n" ,
 				"VGhpcyBpcyBhIHRlc3Q=" , buffer );
@@ -42,7 +42,7 @@ bool test_01_base64( )
 		}
 
 		/* check result */
-		if( strcmp( buffer , "This is a test" ) != 0 )
+		if( les_ssl_cmp( buffer , "This is a test" ) != 0 )
 		{
 			printf( "ERROR: expected to find encoded base64 string %s but found %s..\n" ,
 				"This is a test" , buffer );
@@ -125,7 +125,7 @@ bool test_01( )
 	ctx = les_ssl_context_new( );
 
 	///* call to create a connection */
-	conn = les_ssl_conn_new( ctx , "localhost" , "1234" , NULL , NULL , NULL , NULL );
+	conn = les_ssl_conn_new( ctx , "localhost" , "1234" , NULL , NULL , NULL , NULL , NULL , false );
 	if( !les_ssl_conn_is_ok( conn ) )
 	{
 		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE

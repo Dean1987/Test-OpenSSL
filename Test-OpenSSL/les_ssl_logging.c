@@ -16,11 +16,11 @@ void WriteLogging( const char* strFile , long lLine , const char* strMsg )
 	if( !bLoggingSuc )
 		return;
 
-	char strCmd[MAX_PATH] = "";
+	char strCmd[1024] = "";
 	if( strFile != NULL )
-		sprintf_s( strCmd , MAX_PATH , "python %s %s a %s %ld %s" , LOGGING_PYTHON_FILE , LOGGING_FILE , strFile , lLine , strMsg );
+		sprintf_s( strCmd , 1024 , "python %s %s a %s %ld %s" , LOGGING_PYTHON_FILE , LOGGING_FILE , strFile , lLine , strMsg );
 	else
-		sprintf_s( strCmd , MAX_PATH , "python %s %s a %s" , LOGGING_PYTHON_FILE , LOGGING_FILE , strMsg );
+		sprintf_s( strCmd , 1024 , "python %s %s a %s" , LOGGING_PYTHON_FILE , LOGGING_FILE , strMsg );
 
 	int nRet = system( strCmd );
 	if( nRet == 0 )
@@ -36,23 +36,23 @@ void les_ssl_print( int nLevel , const char* strFile , long lLine , const char* 
 		strHeader = "Err";
 	else if( nLevel & LES_SSL_LOGGING_DEBUG )
 		strHeader = "Debug";
+	
+	char strTmp[1024] = "";
+	/* print the message */
+	va_start( args , strMsg );
+	vsprintf_s( strTmp , 1024 , strMsg , args );
+	va_end( args );
+
+	strMsg = strTmp;
 	if( ( nLevel & LES_SSL_LOGGING_MSG ) || ( nLevel & LES_SSL_LOGGING_ERR ) )
 	{
-		char strTmp[MAX_PATH] = "";
-		/* print the message */
-		va_start( args , strMsg );
-		vsprintf_s( strTmp , MAX_PATH , strMsg , args );
-		va_end( args );
-
-		strMsg = strTmp;
 		printf( strMsg );
 		printf( "\n" );
-		
-		char strTmpLog[MAX_PATH] = "";
-		sprintf_s( strTmpLog , MAX_PATH , "\"%s: %s\"" , strHeader , strMsg );
-		strMsg = strTmpLog;
-		
 	}
+		
+	char strTmpLog[1024] = "";
+	sprintf_s( strTmpLog , 1024 , "\"%s: %s\"" , strHeader , strMsg );
+	strMsg = strTmpLog;
 
 	if( LES_SSL_LOGGING_PRINT_DEBUG )
 	{

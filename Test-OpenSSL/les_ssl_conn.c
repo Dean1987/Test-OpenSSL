@@ -6,6 +6,8 @@
 #include "les_ssl_string.h"
 #include "les_ssl_msg.h"
 
+bool g_bNonce_init = false;
+
 //设置非延时
 bool conn_set_sock_tcp_nodelay( SOCKET sSocket , bool bEnable )
 {
@@ -32,14 +34,91 @@ bool conn_set_sock_block( SOCKET sSocket , bool bEnable )
 	return true;
 }
 
-int les_ssl_conn_default_receive( LES_SSL_Conn* pConn , char* strBuffer , int nBuffer_size )
+bool get_nonce( char* strBuffer , int nNonce_size )
 {
-	return recv( pConn->sSession , strBuffer , nBuffer_size , 0 );
+	int nRandom_value = 0;
+	int nIterator = 0;
+
+	if( strBuffer == NULL || nNonce_size <= 0 )
+		return false;
+	if( !g_bNonce_init )
+	{
+		srand( ( UINT ) time( NULL ) );
+		g_bNonce_init = true;
+	}
+
+	  /* now get the value from random */
+	nIterator = 0;
+	while( nIterator < nNonce_size )
+	{
+		nRandom_value = rand( );
+
+		/* copy into the buffer */
+		memcpy( strBuffer + nIterator , &nRandom_value , sizeof( nRandom_value ) );
+		nIterator += sizeof( nRandom_value );
+	} /* end while */
+
+	return true;
 }
 
-int les_ssl_conn_default_send( LES_SSL_Conn* pConn , char* strBuffer , int nBuffer_size )
+char* conn_get_client_init( LES_SSL_Conn* pConn , LES_SSL_ConnOpts* pOpts )
 {
-	return send( pConn->sSession , strBuffer , nBuffer_size , 0 );
+	/* build sec-websocket-key */
+	char strKey[50] = { "" };
+	size_t nKey_size = 50;
+	char strNonce[17] = { "" };
+
+	/* get the nonce */
+	if( !get_nonce( strNonce , 16 ) )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Failed to get nonce, unable to produce Sec-WebSocket-Key." );
+		return NULL;
+	} /* end if */
+
+	  /* now base 64 */
+	if( !base64_encode( strNonce , 16 , strKey , &nKey_size ) )
+	{
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+			, "Unable to base 64 encode characters for Sec-WebSocket-Key" );
+		return NULL;
+	}
+
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+		, "Created Sec-WebSocket-Key nonce: %s" , strKey );
+
+	/* create accept and store */
+	pConn->pHandshake = calloc_new( LES_SSL_Handshake , 1 );
+	pConn->pHandshake->strExpected_accept = _strdup( strKey );
+
+	/* send initial handshake                                                                                                                        |cookie |prot  | */
+	return les_ssl_string_printfv( "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nOrigin: %s\r\n%s%s%s%s%s%s%s%sSec-WebSocket-Version: %d\r\n\r\n" ,
+		pConn->strGet_url , pConn->strHost_name ,
+		/* sec-websocket-key */
+		strKey ,
+		/* Origin */
+		pConn->strOrigin ,
+		/* Cookie */
+		( pOpts && pOpts->strCookie ) ? "Cookie" : "" ,
+		( pOpts && pOpts->strCookie ) ? ": " : "" ,
+		( pOpts && pOpts->strCookie ) ? pOpts->strCookie : "" ,
+		( pOpts && pOpts->strCookie ) ? "\r\n" : "" ,
+		/* protocol part */
+		pConn->strProtocols ? "Sec-WebSocket-Protocol" : "" ,
+		pConn->strProtocols ? ": " : "" ,
+		pConn->strProtocols ? pConn->strProtocols : "" ,
+		pConn->strProtocols ? "\r\n" : "" ,
+		pConn->pCtx->nProtocol_version );
+}
+
+int les_ssl_conn_default_receive( LES_SSL_Conn* pConn , char* strBuffer , size_t nBuffer_size )
+{
+	return recv( pConn->sSession , strBuffer , ( int ) nBuffer_size , 0 );
+}
+
+int les_ssl_conn_default_send( LES_SSL_Conn* pConn , char* strBuffer , size_t nBuffer_size )
+{
+	return send( pConn->sSession , strBuffer , ( int ) nBuffer_size , 0 );
 }
 
 SOCKET les_ssl_sock_connect( LES_SSL_Context* pCtx , const char * strHost ,	const char* strPort )
@@ -97,13 +176,13 @@ SOCKET les_ssl_sock_connect( LES_SSL_Context* pCtx , const char * strHost ,	cons
 }
 
 LES_SSL_Conn* les_ssl_conn_new( LES_SSL_Context* pCtx , const char* strHost_ip , const char* strHost_port
-	, const char* strHost_name , const char* strGet_url , const char* strProtocols , const char* strOrigin )
+	, const char* strHost_name , const char* strGet_url , const char* strProtocols , const char* strOrigin 
+	, LES_SSL_ConnOpts* pOptions , bool bEnable_tls )
 {
 	LES_SSL_Conn* pConn = NULL;
-	LES_SSL_ConnOpts* pOptions = NULL;
 	SOCKET sSession = 0;
 	char* strContent = NULL;
-	int nSize = 0;
+	size_t nSize = 0;
 	int nSsl_error = 0;
 	X509* sServer_cert = NULL;
 	int nIterator = 0;
@@ -163,8 +242,8 @@ LES_SSL_Conn* les_ssl_conn_new( LES_SSL_Context* pCtx , const char* strHost_ip ,
 	pConn->nRole = LES_SSL_ROLE_CLIENT;
 
 	/* record host and port */
-	pConn->strHost = strdup( strHost_ip );
-	pConn->strPort = strdup( strHost_port );
+	pConn->strHost = _strdup( strHost_ip );
+	pConn->strPort = _strdup( strHost_port );
 
 	/* configure default handlers */
 	pConn->pReceive = les_ssl_conn_default_receive;
@@ -172,206 +251,209 @@ LES_SSL_Conn* les_ssl_conn_new( LES_SSL_Context* pCtx , const char* strHost_ip ,
 
 	/* build host name */
 	if( strHost_name == NULL )
-		pConn->strHost_name = strdup( strHost_ip );
+		pConn->strHost_name = _strdup( strHost_ip );
 	else
-		pConn->strHost_name = strdup( strHost_name );
+		pConn->strHost_name = _strdup( strHost_name );
 
 	/* build origin */
 	if( strOrigin == NULL )
-		pConn->strOrigin = strdup_printf( "http://%s" , conn->host_name );
+		pConn->strOrigin = les_ssl_string_printfv( "http://%s" , pConn->strHost_name );
 	else
-		conn->strOrigin = strdup( strOrigin );
+		pConn->strOrigin = _strdup( strOrigin );
 
 	/* get url */
 	if( strGet_url == NULL )
-		conn->get_url = nopoll_strdup( "/" );
+		pConn->strGet_url = _strdup( "/" );
 	else
-		conn->get_url = nopoll_strdup( strGet_url );
+		pConn->strGet_url = _strdup( strGet_url );
 
 	/* protocols */
 	if( strProtocols != NULL )
-		conn->protocols = nopoll_strdup( strProtocols );
+		pConn->strProtocols = _strdup( strProtocols );
 
 
 	/* get client init payload */
-	content = __nopoll_conn_get_client_init( conn , options );
+	strContent = conn_get_client_init( pConn , pOptions );
 
-	if( content == NULL )
+	if( strContent == NULL )
 	{
-		nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Failed to build client init message, unable to connect" );
-		nopoll_conn_shutdown( conn );
+		les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+			, "Failed to build client init message, unable to connect" );
+		les_ssl_conn_shutdown( pConn );
 
 		/* release connection options */
-		__nopoll_conn_opts_release_if_needed( options );
+		les_ssl_conn_opts_release( pOptions );
 
 		return NULL;
-	} /* end if */
+	}
 
-	  /* check for TLS support */
-	if( enable_tls )
-	{
-		/* found TLS connection request, enable it */
-		conn->ssl_ctx = __nopoll_conn_get_ssl_context( ctx , conn , options , nopoll_true );
+	/* check for TLS support */
+	//if( bEnable_tls )
+	//{
+	//	/* found TLS connection request, enable it */
+	//	pConn->pSsl_ctx = __nopoll_conn_get_ssl_context( ctx , conn , options , nopoll_true );
 
-		/* check for client side SSL configuration */
-		if( !__nopoll_conn_set_ssl_client_options( ctx , conn , options ) )
-		{
-			nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Unable to configure additional SSL options, unable to continue" ,
-				conn->ssl_ctx , conn->ssl );
-			goto fail_ssl_connection;
-		} /* end if */
+	//	/* check for client side SSL configuration */
+	//	if( !__nopoll_conn_set_ssl_client_options( ctx , conn , options ) )
+	//	{
+	//		nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Unable to configure additional SSL options, unable to continue" ,
+	//			conn->ssl_ctx , conn->ssl );
+	//		goto fail_ssl_connection;
+	//	} /* end if */
 
-		  /* create context and check for result */
-		conn->ssl = SSL_new( conn->ssl_ctx );
-		if( conn->ssl_ctx == NULL || conn->ssl == NULL )
-		{
-			nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Unable to create SSL context internal references are null (conn->ssl_ctx=%p, conn->ssl=%p)" ,
-				conn->ssl_ctx , conn->ssl );
-		fail_ssl_connection:
+	//	  /* create context and check for result */
+	//	conn->ssl = SSL_new( conn->ssl_ctx );
+	//	if( conn->ssl_ctx == NULL || conn->ssl == NULL )
+	//	{
+	//		nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Unable to create SSL context internal references are null (conn->ssl_ctx=%p, conn->ssl=%p)" ,
+	//			conn->ssl_ctx , conn->ssl );
+	//	fail_ssl_connection:
 
-			nopoll_free( content );
-			nopoll_conn_shutdown( conn );
+	//		nopoll_free( content );
+	//		nopoll_conn_shutdown( conn );
 
-			/* release connection options */
-			__nopoll_conn_opts_release_if_needed( options );
+	//		/* release connection options */
+	//		__nopoll_conn_opts_release_if_needed( options );
 
-			return conn;
-		} /* end if */
+	//		return conn;
+	//	} /* end if */
 
-		  /* set socket */
-		SSL_set_fd( conn->ssl , conn->session );
+	//	  /* set socket */
+	//	SSL_set_fd( conn->ssl , conn->session );
 
-		/* do the initial connect connect */
-		nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "connecting to remote TLS site" );
-		iterator = 0;
-		while( SSL_connect( conn->ssl ) <= 0 )
-		{
+	//	/* do the initial connect connect */
+	//	nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "connecting to remote TLS site" );
+	//	iterator = 0;
+	//	while( SSL_connect( conn->ssl ) <= 0 )
+	//	{
 
-			/* get ssl error */
-			ssl_error = SSL_get_error( conn->ssl , -1 );
+	//		/* get ssl error */
+	//		ssl_error = SSL_get_error( conn->ssl , -1 );
 
-			switch( ssl_error )
-			{
-				case SSL_ERROR_WANT_READ:
-					nopoll_log( ctx , NOPOLL_LEVEL_WARNING , "still not prepared to continue because read wanted, conn-id=%d (%p, session: %d), errno=%d" ,
-						conn->id , conn , conn->session , errno );
-					break;
-				case SSL_ERROR_WANT_WRITE:
-					nopoll_log( ctx , NOPOLL_LEVEL_WARNING , "still not prepared to continue because write wanted, conn-id=%d (%p)" ,
-						conn->id , conn );
-					break;
-				case SSL_ERROR_SYSCALL:
-					nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "syscall error while doing TLS handshake, ssl error (code:%d), conn-id: %d (%p), errno: %d, session: %d" ,
-						ssl_error , conn->id , conn , errno , conn->session );
-					nopoll_conn_log_ssl( conn );
-					nopoll_conn_shutdown( conn );
-					nopoll_free( content );
+	//		switch( ssl_error )
+	//		{
+	//			case SSL_ERROR_WANT_READ:
+	//				nopoll_log( ctx , NOPOLL_LEVEL_WARNING , "still not prepared to continue because read wanted, conn-id=%d (%p, session: %d), errno=%d" ,
+	//					conn->id , conn , conn->session , errno );
+	//				break;
+	//			case SSL_ERROR_WANT_WRITE:
+	//				nopoll_log( ctx , NOPOLL_LEVEL_WARNING , "still not prepared to continue because write wanted, conn-id=%d (%p)" ,
+	//					conn->id , conn );
+	//				break;
+	//			case SSL_ERROR_SYSCALL:
+	//				nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "syscall error while doing TLS handshake, ssl error (code:%d), conn-id: %d (%p), errno: %d, session: %d" ,
+	//					ssl_error , conn->id , conn , errno , conn->session );
+	//				nopoll_conn_log_ssl( conn );
+	//				nopoll_conn_shutdown( conn );
+	//				nopoll_free( content );
 
-					/* release connection options */
-					__nopoll_conn_opts_release_if_needed( options );
+	//				/* release connection options */
+	//				__nopoll_conn_opts_release_if_needed( options );
 
-					return conn;
-				default:
-					nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "there was an error with the TLS negotiation, ssl error (code:%d) : %s" ,
-						ssl_error , ERR_error_string( ssl_error , NULL ) );
-					nopoll_conn_log_ssl( conn );
-					nopoll_conn_shutdown( conn );
-					nopoll_free( content );
+	//				return conn;
+	//			default:
+	//				nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "there was an error with the TLS negotiation, ssl error (code:%d) : %s" ,
+	//					ssl_error , ERR_error_string( ssl_error , NULL ) );
+	//				nopoll_conn_log_ssl( conn );
+	//				nopoll_conn_shutdown( conn );
+	//				nopoll_free( content );
 
-					/* release connection options */
-					__nopoll_conn_opts_release_if_needed( options );
+	//				/* release connection options */
+	//				__nopoll_conn_opts_release_if_needed( options );
 
-					return conn;
-			} /* end switch */
+	//				return conn;
+	//		} /* end switch */
 
-			  /* try and limit max reconnect allowed */
-			iterator++;
+	//		  /* try and limit max reconnect allowed */
+	//		iterator++;
 
-			if( iterator > 100 )
-			{
-				nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Max retry calls=%d to SSL_connect reached, shutting down connection id=%d, errno=%d" ,
-					iterator , conn->id , errno );
-				nopoll_free( content );
+	//		if( iterator > 100 )
+	//		{
+	//			nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Max retry calls=%d to SSL_connect reached, shutting down connection id=%d, errno=%d" ,
+	//				iterator , conn->id , errno );
+	//			nopoll_free( content );
 
-				/* release connection options */
-				__nopoll_conn_opts_release_if_needed( options );
+	//			/* release connection options */
+	//			__nopoll_conn_opts_release_if_needed( options );
 
-				return conn;
-			} /* end if */
+	//			return conn;
+	//		} /* end if */
 
-			  /* wait a bit before retry */
-			nopoll_sleep( 10000 );
+	//		  /* wait a bit before retry */
+	//		nopoll_sleep( 10000 );
 
-		} /* end while */
+	//	} /* end while */
 
-		nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "Client TLS handshake finished, configuring I/O handlers" );
+	//	nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "Client TLS handshake finished, configuring I/O handlers" );
 
-		/* check remote certificate (if it is present) */
-		server_cert = SSL_get_peer_certificate( conn->ssl );
-		if( server_cert == NULL )
-		{
-			nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "server side didn't set a certificate for this session, these are bad news" );
+	//	/* check remote certificate (if it is present) */
+	//	server_cert = SSL_get_peer_certificate( conn->ssl );
+	//	if( server_cert == NULL )
+	//	{
+	//		nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "server side didn't set a certificate for this session, these are bad news" );
 
-			/* release connection options */
-			nopoll_free( content );
-			__nopoll_conn_opts_release_if_needed( options );
+	//		/* release connection options */
+	//		nopoll_free( content );
+	//		__nopoll_conn_opts_release_if_needed( options );
 
-			return conn;
-		}
-		X509_free( server_cert );
+	//		return conn;
+	//	}
+	//	X509_free( server_cert );
 
-		/* call to check post ssl checks after SSL finalization */
-		if( conn->ctx && conn->ctx->post_ssl_check )
-		{
-			if( !conn->ctx->post_ssl_check( conn->ctx , conn , conn->ssl_ctx , conn->ssl , conn->ctx->post_ssl_check_data ) )
-			{
-				/* TLS post check failed */
-				nopoll_log( conn->ctx , NOPOLL_LEVEL_CRITICAL , "TLS/SSL post check function failed, dropping connection" );
-				nopoll_conn_shutdown( conn );
-				return NULL;
-			} /* end if */
-		} /* end if */
+	//	/* call to check post ssl checks after SSL finalization */
+	//	if( conn->ctx && conn->ctx->post_ssl_check )
+	//	{
+	//		if( !conn->ctx->post_ssl_check( conn->ctx , conn , conn->ssl_ctx , conn->ssl , conn->ctx->post_ssl_check_data ) )
+	//		{
+	//			/* TLS post check failed */
+	//			nopoll_log( conn->ctx , NOPOLL_LEVEL_CRITICAL , "TLS/SSL post check function failed, dropping connection" );
+	//			nopoll_conn_shutdown( conn );
+	//			return NULL;
+	//		} /* end if */
+	//	} /* end if */
 
-		  /* configure default handlers */
-		conn->receive = nopoll_conn_tls_receive;
-		conn->send = nopoll_conn_tls_send;
+	//	  /* configure default handlers */
+	//	conn->receive = nopoll_conn_tls_receive;
+	//	conn->send = nopoll_conn_tls_send;
 
-		nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "TLS I/O handlers configured" );
-		conn->tls_on = nopoll_true;
-	} /* end if */
+	//	nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "TLS I/O handlers configured" );
+	//	conn->tls_on = nopoll_true;
+	//}
 
-	nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "Sending websocket client init: %s" , content );
-	size = strlen( content );
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE 
+		, "Sending websocket client init: %s" , strContent );
+	nSize = strlen( strContent );
 
 	/* call to send content */
-	remaining_timeout = ctx->conn_connect_std_timeout;
-	while( remaining_timeout > 0 )
+	lRemaining_timeout = pCtx->lConn_connect_std_timeout;
+	while( lRemaining_timeout > 0 )
 	{
-		if( size != conn->send( conn , content , size ) )
+		if( nSize != pConn->pSend( pConn , strContent , nSize ) )
 		{
 			/* for some reason, under FreeBSD, a ENOTCONN is reported when they should be returning EINPROGRESS and/or EWOULDBLOCK */
-			if( errno == NOPOLL_EWOULDBLOCK || errno == NOPOLL_EINPROGRESS || errno == NOPOLL_ENOTCONN )
+			if( errno != WSAEINPROGRESS && errno != WSAEWOULDBLOCK && errno != WSAENOTCONN )
 			{
-				/* nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Connection in progress (errno=%d), session: %d", errno, session); */
-				nopoll_sleep( 10000 );
-				remaining_timeout -= 10000;
+				Sleep( 10 );
+				lRemaining_timeout -= 10000;
 				continue;
-			} /* end if */
+			}
 
-			nopoll_log( ctx , NOPOLL_LEVEL_CRITICAL , "Failed to send websocket init message, error code was: %d (2), closing session" , errno );
-			nopoll_conn_shutdown( conn );
-		} /* end if */
+			les_ssl_print( LES_SSL_LOGGING_ERR | LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+				, "Failed to send websocket init message, error code was: %d (2), closing session" , errno );
+			les_ssl_conn_shutdown( pConn );
+		}
 
 		break;
 	}
 
-	nopoll_log( ctx , NOPOLL_LEVEL_DEBUG , "Web socket initial client handshake sent" );
+	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
+		, "Web socket initial client handshake sent" );
 
 	/* release content */
-	nopoll_free( content );
+	free( strContent );
 
 	/* release connection options */
-	__nopoll_conn_opts_release_if_needed( options );
+	les_ssl_conn_opts_release( pOptions );
 
 	/* return connection created */
 	return pConn;
@@ -395,7 +477,7 @@ void les_ssl_conn_shutdown( LES_SSL_Conn * pConn )
 		strRole = "unknown";
 
 	les_ssl_print( LES_SSL_LOGGING_DEBUG , LES_SSl_FILE , LES_SSl_LINE
-		, "shutting down connection id=%d (session: %d, role: %s)" ,
+		, "shutting down connection id=%d (session: %d, role: %d)" ,
 		pConn->nId , pConn->sSession , pConn->nRole );
 
 	/* call to on close handler if defined */
@@ -481,7 +563,7 @@ size_t les_ssl_conn_readline( LES_SSL_Conn* pConn , char* strBuffer , int nMaxle
 
 	/* check for pending line read */
 	nDesp = 0;
-	if( pConn->strPending_line );
+	if( pConn->strPending_line != NULL )
 	{
 		/* get size and check exceeded values */
 		nDesp = strlen( pConn->strPending_line );
@@ -634,8 +716,8 @@ bool les_ssl_conn_get_http_url( LES_SSL_Conn* pConn , const char* strBuffer , si
 	} 
 
 	  /* now check trailing content */
-	return strcmp( strBuffer + nIterator , "HTTP/1.1\r\n" ) == 0
-		|| strcmp( strBuffer + nIterator , "HTTP/1.1\n" );
+	return les_ssl_cmp( strBuffer + nIterator , "HTTP/1.1\r\n" ) == 0
+		|| les_ssl_cmp( strBuffer + nIterator , "HTTP/1.1\n" );
 }
 
 bool les_ssl_conn_get_mime_header( LES_SSL_Context* pCtx , LES_SSL_Conn* pConn , const char* strBuffer , size_t nBuffer_size 
